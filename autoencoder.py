@@ -36,7 +36,8 @@ data = data[100:]
 def build_autoencoder(img_shape):
 
     input_img = Input(shape=img_shape)
-    x = MaxPooling2D((2, 2), padding='same')(input_img)
+    x = Conv2D(64, (3, 3), padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(32, (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
@@ -44,9 +45,11 @@ def build_autoencoder(img_shape):
     x = Conv2D(16, (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
-    encoded = MaxPooling2D((2, 2), padding='same', name='endEncoder')(x)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Dense(16, activation='relu', name='endEncoder')(x)
+    # encoder
 
-    x = Conv2D(16, (3, 3), padding='same')(encoded)
+    x = Conv2D(16, (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
     x = UpSampling2D((2, 2))(x)
@@ -105,14 +108,19 @@ def show_evaluation(original,evaluated):
         plt.axis("off")
     plt.show()
 
-def full_processing(data, encoder):
-    return encoder.predict([raw_data])
+def full_processing(raw_data, encoder, labels):
+    a= encoder.predict([raw_data])
+    res={}
+    for  i, pred in enumerate(a):
+        res[labels[i]]=pred
+    np.save('./autoencoded_pictures', res)
+    return a
 
 
 def split_autencoder(autoencoder):
     encoder_input = Input(autoencoder.layers[1].input_shape[1:])
     encoder_model = encoder_input
-    for layer in autoencoder.layers[1:10]:
+    for layer in autoencoder.layers[1:11]:
         encoder_model = layer(encoder_model)
     encoder_model = keras.Model(inputs=encoder_input, outputs=encoder_model)
     return encoder_model
@@ -127,16 +135,64 @@ def split_autencoder_decoder(autoencoder):
 
 
 if __name__ == '__main__':
+    #loading data
+    data = (np.load("../Images/patchesArray.npy", allow_pickle=True))
+    raw_data= list(data.item().values())
+    labels = np.asarray(list(data.item().keys()))
 
-    data = np.load("patchesArray.npy", allow_pickle=True)
-    raw_data = np.asarray(list(data[:, 1]))/255
-    labels = np.asarray(list(data[:, 0]))
-
-
-
-
+    """
+    # building the autoencoder
     autoencoder = build_autoencoder(raw_data.shape[1:])
     autoencoder.summary()
+    autoencoder.compile(optimizer='adadelta', loss=tf.keras.losses.MeanSquaredError())
+    train_autoenc(autoencoder, data=raw_data, epochs=200)
+    """
+    #getting the encoder
+    autoencoder = keras.models.load_model('best_model.h5')
+    keras.utils.plot_model(autoencoder, "autoenco.png")
+    autoencoder.summary()
+
+    enco = split_autencoder(autoencoder)
+    keras.utils.plot_model(enco, "enco.png")
+    enco.summary()
+
+
+
+
+    """
+    #visual evaluation
+    orig, ev = evaluate_network(raw_data, autoencoder)
+    show_evaluation(orig, ev)
+    """
+    """
+    #predict: normal way
+    #raw_data= np.asarray(list(data.item().values()))/255
+    #full_processing(raw_data, enco, labels)
+
+    #predict: with big data_
+    batchsize=10000# batch of size 100000 (easily predictable)
+    print(len(raw_data))
+    nbBatch = len(raw_data)//batchsize +1 #number of batch of size 100000 (easily predictable)
+    res={}
+    for mara in range(nbBatch-1):
+        print(mara, '/', nbBatch)
+        array_of_batches=np.asarray(raw_data[mara*batchsize : (mara+1)*batchsize] )
+        predicted = enco.predict(array_of_batches/255)
+        for i in range(len(predicted)):
+            res[labels[i+mara*batchsize]]= predicted[i]
+    """
+
+    """ploud=[]
+    for i, pred in enumerate(a):
+        res[labels[i]] = pred
+    for i, batch in enumerate(array_of_batches):
+        predicted = enco.predict([raw_data])
+        for j, a in enumerate(predicted):
+            res[labels[i][j]]= a"""
+
+    #np.save('./madness', res)
+
+
 
 
 

@@ -1,34 +1,17 @@
 import numpy as np
-from openslide import OpenSlide
+import imageio
+from openslide.openslide import OpenSlide
 from os import listdir, mkdir, wait
+from utils.path import IMG_DIR, PTCH_DIR
 import sys
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+#from mpl_toolkits.mplot3d import Axes3D
 
 IMG_SIZE=64
-IMG_DIR="../../images/entrainementColon/"
-PTCH_DIR="./patchesImageFull/"
 
-BACKGROUND_PATCH=210
+
+BACKGROUND_PATCH=190
 BLACK_AREA = 10
-
-def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\n"):
-    """
-    Call in a loop to create terminal progress bar
-    @params:
-        iteration   - Required  : current iteration (Int)
-        total       - Required  : total iterations (Int)
-        prefix      - Optional  : prefix string (Str)
-        suffix      - Optional  : suffix string (Str)
-        decimals    - Optional  : positive number of decimals in percent complete (Int)
-        length      - Optional  : character length of bar (Int)
-        fill        - Optional  : bar fill character (Str)
-        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
-    """
-
-    count = 45
-
-
 
 def dirTreating():
     try:
@@ -57,9 +40,7 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
     :param source_img_name:
     :return:an array with all the numpy array corresponding to the chosen patches (might be slightly less than the number of required samples depending on image quality)
     """
-    # for the progress bar
-    unitColor = '\033[5;36m\033[5;47m'
-    endColor = '\033[0;0m\033[0;0m'
+
 
     w, h = img.dimensions
     print(source_img_name + " width=" + str(w) + " height=" + str(h) + "number of patches:" + str(h//IMG_SIZE*w//IMG_SIZE))
@@ -98,6 +79,17 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
 
 
 if __name__ == '__main__':
-    img = OpenSlide(IMG_DIR + "A17-4822_-_2019-11-06_14.45.09.ndpi")
-    w, h = img.dimensions
-    img.get_thumbnail((h,w)).save("test", "PNG")
+    try:
+        mkdir(PTCH_DIR)
+        print("creating the 'patches' folder")
+    except FileExistsError:
+        print("the " + PTCH_DIR + " folder already exists")
+    fileNameList = listdir(IMG_DIR)
+    f = {}
+    print(len(fileNameList))
+    for name in fileNameList:
+        if name[-4:] == ".png":
+
+            img = imageio.imread(IMG_DIR + name)
+            f[name]=img
+    np.save(IMG_DIR + "/../patchesArray", f)
