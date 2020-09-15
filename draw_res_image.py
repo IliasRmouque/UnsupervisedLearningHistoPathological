@@ -1,42 +1,88 @@
 from PIL import Image
 from utils.path import IMG_DIR, PTCH_DIR
-import csv
 import numpy as np
-import clustering
+from numba import njit
+
 
 def initiate_color_masks(nb_clust, size):
-    colorMask=[Image.new('RGB', size=size, color="hsl("+str(round(i/nb_clust*360))+ ",100%, 50%)") for i in range(nb_clust)]
+    colorMask=[Image.new('RGB', size=(size, size), color="hsl("+str(round(i/nb_clust*360))+ ",100%, 50%)") for i in range(nb_clust)]
     return colorMask
 
-def draw_res_image(img_size, table, data, ptch_size, nb_clust=10, thumbsize= (15000,15000)):
-    img = Image.new('RGB', size=(img_size[0], img_size[1]), color=(255,255,255))
-    id = table[0]
-    table = table[1:]
-
-    raw_data = np.asarray(list(data.item().values()))
-    labels = list(data.item().keys())
-    print(len(labels))
-
-    nsamples, nx, ny, nz = raw_data.shape
-    dat_to_cluster = raw_data.reshape((nsamples, nx * ny * nz))
-    print("start cluster")
+def initiate_color_masks_gpu(nb_clust, size):
+    colorMask=[np.asarray(Image.new('RGB', size=(size, size), color="hsl("+str(round(i/nb_clust*360))+ ",100%, 50%)")) for i in range(nb_clust)]
+    return colorMask
 
 
-    print(len(labels))
-    a = clustering.make_clustes(dat_to_cluster, nb_clust)
-    print("a", len(a))
-    dct = dict(zip(labels, a))
+def draw_res_image(img_size, patch_dir,  nb_clust=10):
 
-    print("end cluster")
+    ptch_size =list(patch_dir.values())[0].size
+    img = Image.new('RGB', size=img_size, color=(255,255,255))
+    #TODO: patch_dir.values[0].size ?
     colorMask= initiate_color_masks(nb_clust, size=ptch_size)
+
     cpt=0
-    for ind, info in enumerate(table):
-        if info[3]=='1':
-                    cpt+=1
-                    patch = Image.open(PTCH_DIR +info[0]+".png")
-                    patch=Image.blend(patch, colorMask[dct[info[0]+'.png']],0.25)
-                    img.paste(patch, (int(info[5])*64 , int(info[4])*64))
-                    pass
+
+
+    for k, ptc in patch_dir.items():
+
+        cpt+=1
+        patch = Image.open(PTCH_DIR + k + ".png")
+        patch = Image.blend(patch, colorMask[ptc.colour], 0.3)
+        img.paste(patch, ptc.get_pos())
+        patch.close()
+
+    px_legend = 10
+    for i, col in enumerate(colorMask):
+        for j in range(px_legend):
+            img.paste(col, (j*ptch_size, i*ptch_size))
+
+
     print(cpt)
-    img.thumbnail(thumbsize)
-    img.save("lola.jpg", "JPEG", )
+
+
+    return img
+
+
+def draw_origin_image(img_size, patch_dir,  nb_clust=10):
+
+    ptch_size =list(patch_dir.values())[0].size
+    img = Image.new('RGB', size=img_size, color=(255,255,255))
+    cpt=0
+    for k, ptc in patch_dir.items():
+        cpt+=1
+        patch = Image.open(PTCH_DIR + k + ".png")
+        img.paste(patch, ptc.get_pos())
+        patch.close()
+    print(cpt)
+
+
+    return img
+
+@njit
+def go_faster(img , patch,x, y):
+    img[x][y]=patch
+
+
+def draw_res_image_gpu(img_size, patch_dir,  nb_clust=10):
+    ptch_size =list(patch_dir.values())[0].size
+    img = np.asarray(Image.new('RGB', size=img_size, color=(255,255,255)), dtype= np.uint8)
+    #TODO: patch_dir.values[0].size ?
+    colorMask= initiate_color_masks_gpu(nb_clust, size=ptch_size)
+    cpt=0
+    for k, ptc in patch_dir.items():
+        cpt+=1
+        patch = np.asarray(Image.open(PTCH_DIR + k + ".png"))
+        patch = patch *0.7 + colorMask[ptc.colour]* 0.3
+        go_faster(img, patch, ptc.get_pos[0], ptc.get_pos[1])
+
+
+    px_legend = 10
+    for i, col in enumerate(colorMask):
+        for j in range(px_legend):
+            img.paste(col, (j*ptch_size, i*ptch_size))
+
+
+    print(cpt)
+    return img
+
+

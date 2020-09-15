@@ -1,6 +1,6 @@
 import numpy as np
 import imageio
-from openslide.openslide import OpenSlide
+#import Openslide
 from os import listdir, mkdir, wait
 from utils.path import IMG_DIR, PTCH_DIR
 import sys
@@ -12,6 +12,22 @@ IMG_SIZE=64
 
 BACKGROUND_PATCH=190
 BLACK_AREA = 10
+
+
+class Patch:
+    def __init__(self, name, size, row, column):
+        self.imgName = name
+        self.row = row
+        self.column = column
+        self.size = size
+        self.img = None
+        #TODO: Find a way to initialise properly
+        self.colour = 0
+
+    def get_pos(self):
+        return self.column * self.size, self.row * self.size
+
+
 
 def dirTreating():
     try:
@@ -66,7 +82,7 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
                     numStop = round(((((h // IMG_SIZE)-i) * (w // IMG_SIZE) - j) / (number_of_samples - cpt + 1)))
                     patch.save(PTCH_DIR+fileName, "PNG")
                     nArrayRes.append((fileName, npimg))
-                    printProgressBar(cpt,number_of_samples)
+
                     print('patch ', cpt, '/', number_of_samples)
                 patch.close()
                 if cpt == number_of_samples:
@@ -79,6 +95,7 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
 
 
 if __name__ == '__main__':
+    pass
     try:
         mkdir(PTCH_DIR)
         print("creating the 'patches' folder")
@@ -89,7 +106,9 @@ if __name__ == '__main__':
     print(len(fileNameList))
     for name in fileNameList:
         if name[-4:] == ".png":
-
             img = imageio.imread(IMG_DIR + name)
             f[name]=img
-    np.save(IMG_DIR + "/../patchesArray", f)
+
+    np.save(IMG_DIR + "/../Test2/patchesArray2", f)
+
+
