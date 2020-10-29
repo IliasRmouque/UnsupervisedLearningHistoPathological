@@ -128,3 +128,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 /Cytomine/
+/anno/
+/annotation_10847/
