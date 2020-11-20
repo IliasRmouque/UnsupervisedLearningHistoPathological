@@ -10,8 +10,8 @@ from cytomine.models import  AnnotationCollection,  ImageInstanceCollection
 from cytomine import Cytomine
 
 host = "http://cytomine.icube.unistra.fr"
-public_key = "8da00e26-3bcb-4229-b31d-a2b5937c4e5e"  # check your own keys from your account page in the web interface
-private_key = "c0018f6a-8aa1-4791-957b-ab72dce4238d"
+public_key = "8a00e26-3bcb-4229-b31d-a2b5937c4e5e"  # check your own keys from your account page in the web interface
+private_key = "c018f6a-8aa1-4791-957b-ab72dce4238d"
 
 
 if __name__ == '__main__':
