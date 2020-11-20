@@ -452,7 +452,7 @@ def data_visualisation( nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, img_id, t
                         real.append(term_score[j["Term"]]["Real"])
         except KeyError:
             pass
-    print("Pour", nb_clust, "clusters \nARI=", adjusted_mutual_info_score(real, pred), "\nNMI=",
+    print("Pour", nb_clust, "clusters \nARI=", se, "\nNMI=",
           normalized_mutual_info_score(real, pred))
     predt=[]
     rt=[]
@@ -611,6 +611,7 @@ def get_termlist(dct_patch,mask_type, nb_clust, IMG_SIZE, LOD):
                         class_color += 1
                     j["Clust"][colour].append(colour)
                     term_list[j["Term"]]["Patches"].append(key)
+                    ptch.term=j["Term"]
     return term_list
 
 

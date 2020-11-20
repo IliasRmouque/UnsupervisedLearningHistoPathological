@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Conv2DTranspose,Lambda, Reshape, Flatten, Input, Dense, Conv2D,MaxPooling3D, MaxPooling2D, UpSampling2D, UpSampling3D, BatchNormalization, Activation
-from tensorflow.keras import backend as K, Model, metrics, optimizers
+from tensorflow.keras import backend as K, Model, metrics, optimizers, initializers
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import TerminateOnNaN, CSVLogger, ModelCheckpoint, EarlyStopping
@@ -109,38 +109,19 @@ def build_autoencoder(img_shape):
     decoded = Activation('sigmoid')(x)
     return keras.Model(input_img, decoded, name="basic_with_dense")
 
-def build_autoencoder_1(img_shape):
-    input_img = Input(shape=img_shape)
-    x = Conv2D(64, (3, 3), padding='same')(input_img)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = MaxPooling2D((2, 2), padding='same')(x)
-    # =====
-    x = Conv2D(32, (2, 2), padding='same')(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = MaxPooling2D((2, 2), padding='same')(x)
-    # =====
-    sh = x.shape
-    x = Flatten( name='endEncoder')(x)
-    # encoder
+def build_autoencoder_1(img_shape, zspace):
+    shape=img_shape
 
-    x = Reshape(sh[1:])(x)
-    # =======
-    x = Conv2D(32, (2, 2), padding='same')(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = UpSampling2D((2, 2))(x)
-    # =======
-    x = Conv2D(64, (3, 3), padding='same')(x)
-    x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = UpSampling2D((2, 2))(x)
-    # =======
+    input_img = Input(shape=img_shape)
+    x = Flatten()(input_img)
+    x = Dense(zspace, activation='relu', name='endEncoder')(x)
+    encoder = Model(input_img, x, name='encoder')
+    x = Dense(shape[0] * shape[1] * shape[2], activation='relu')(x)
+    x = Reshape((shape[0] , shape[1] , shape[2]))(x)
     x = Conv2D(3, (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     decoded = Activation('sigmoid')(x)
-    return keras.Model(input_img, decoded, name="basic_no_dense")
+    return keras.Model(input_img, decoded, name="basic_no_dense"), encoder
 
 
 def build_autoencoder2(img_shape):
@@ -201,7 +182,10 @@ def build_autoencoder_3(img_shape, nlayers, zsize, finaldim):
 
     if zsize != 0:
         x = Flatten()(x)
-        x = Dense(zsize, activation='relu', name='endEncoder')(x)
+        x = Dense(zsize, activation='relu', name='endEncoder',
+                  kernel_initializer=initializers.RandomNormal(stddev=0.01),
+                  bias_initializer=initializers.Zeros()
+)(x)
 
     encoder = Model(input_img, x, name='encoder')
 
@@ -298,19 +282,20 @@ def split_autencoder(autoencoder):
         encoder_model = layer(encoder_model)
     encoder_model = keras.Model(inputs=encoder_input, outputs=encoder_model)
     return encoder_model
-def train_with_big_ds(autoencoder, data, batchsize, namedir):
+
+def train_with_big_ds(autoencoder, data, batchsize, namedir, epochs= 100):
     nbBatch = len(list(data.values())) // batchsize + 1  # number of batch of size 100000 (easily predictable)
     print("there will be {} trainings".format(nbBatch))
     history = False
     for i in range(0, nbBatch):
         raw_data = np.asarray(list(data.values())[i * batchsize: (i + 1) * batchsize]) / 255
         if not history:
-            history = train_autoenc(autoencoder, data=raw_data, epochs=100, patience=50, plot=False,
+            history = train_autoenc(autoencoder, data=raw_data, epochs= epochs, patience=100, plot=False,
                                     fName=namedir + 'best_model.h5')
         else:
             orig, ev = evaluate_network(list(raw_data), autoencoder)
             show_evaluation(orig, ev, title=namedir + "sub_batch:" + str(i))
-            hist_temp = train_autoenc(autoencoder, data=raw_data, epochs=100, patience=20, plot=False,
+            hist_temp = train_autoenc(autoencoder, data=raw_data, epochs= epochs, patience=20, plot=False,
                                       fName=namedir + 'best_model.h5')
             for k in hist_temp.history.keys():
                 history.history[k] += hist_temp.history[k]
@@ -348,6 +333,83 @@ def split_autencoder_decoder(autoencoder):
     encoder_model = keras.Model(inputs=encoder_input, outputs=encoder_model)
     return encoder_model
 
+def baricenters( pred, termlist):
+    lp={}
+    vres=[]
+    for k, i in termlist.items():
+        lp[k] = []
+        for p in i["Patches"]:
+            lp[k].append(pred[p+".png"])
+    res={}
+    for k, l in lp.items():
+        res[k]= np.mean(np.asarray(l), axis=(0))
+        print(res[k].shape)
+
+    cpt=0
+    t = 0
+    toClust = []
+    real = []
+    v=0
+
+    for k, l in lp.items():
+        t+=len(l)
+        toClust+=l
+        real+=[v]*len(l)
+        if k == "tumor":
+            tum= l
+            coltum=v
+        v+=1
+        for p in l:
+            dist = None
+            for ke, b in res.items():
+                if ke != k:
+                    if dist == None:
+                        dist = np.linalg.norm(b - p)
+                        m=ke
+                    if dist > np.linalg.norm(b - p):
+                        dist = np.linalg.norm(b - p)
+                        m=ke
+            if np.linalg.norm(res[k]- p) >=  np.linalg.norm(res[m]- p):
+                cpt+=1
+    print("cpt", cpt)
+    vres+=[cpt, t]
+    import clustering
+    if cpt != t:
+        for nb_clust in [7,8,9,10]:
+            resc, _ = clustering.make_clusters_2(np.asarray(toClust), nb_clust)
+            unique, counts = np.unique(resc, return_counts=True)
+
+            predt = resc[np.where(np.asarray(real)==coltum)]
+
+            d = 0.9
+            predt= list(predt)
+            resc = list(resc)
+            maxs = []
+
+            for i in unique:
+                cpt = predt.count(i)
+                mem = i
+                if resc.count(i) !=0 :
+                    print()
+                    if predt.count(i)/resc.count(i) > 0.5:
+                        maxs.append(i)
+            if maxs:
+                cptf = 0
+                cptt = 0
+                for i in maxs:
+                    cptt += predt.count(i)
+                    cptf += resc.count(i)
+
+                print(cptt)
+                print(len(predt))
+                vp = cptt
+                fp = cptf - cptt
+                vn = len(resc) - len(predt) - cptf + cptt
+                fn = len(predt) - cptt
+                vres+= [nb_clust, vp, fp, vn, fn, vp / (vp + fn), vn / (vn + fp), adjusted_mutual_info_score(real, resc)]
+    print(vres)
+    return vres
+
 
 if __name__ == '__main__':
 #     data = (np.load(IMG_DIR + "../patchesArray.npy", allow_pickle=True))
@@ -371,60 +433,70 @@ if __name__ == '__main__':
                 dct_patch[record[0]] = Patch(record[0], size=ptch_size, row=int(record[4]),
                                              column=int(record[5]))
     mask_type = load_annotations("./annoWeird.csv", "./anno.csv", IMG_ID, nb_clust)
+    ploud=[]
     # loading data
-    for LOD in [4]:# 2, 4, 8, 16]:
+    for LOD in [LOD]:# 2, 4, 8, 16]:
         IMG_DIR = './../PyHIST/output/' + IMG_NAME + '_' + str(ptch_size) + '*' + str(ptch_size) \
               + "_LOD=" + str(LOD) + '/' + IMG_NAME + '_tiles/'
         data = (np.load(IMG_DIR + "../patchesArray.npy", allow_pickle=True))
         raw_data, labels = process_data(data)
-        raw_data = raw_data
         data = dict(zip(labels, raw_data))
-        data1 = dict(list(data.items())[len(data) // 2:])
-        data2 = dict(list(data.items())[:len(data) // 2])
-        rd=np.asarray(list(data.values()))
-        final={}
-        ploud=0
-        for data in [data1, data2]:
-            print(IMG_DIR)
-            for siz in [2]:
-               for zsiz in [32]:#128,256,512,1024]:
-                   for dim_mid in [32]:
-                     #try:
+        term = get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD)
+        dct_labeled= {}
+        data_labeled = {}
 
-                        raw_data = np.asarray(list(data.values()))
+        raw_data = np.asarray(list(data.values()))
+        raw_data = raw_data / 255
+        for siz in [2]:
+            for zsiz in [50]:
+                for dim_mid in range(1, 32, 2):
+                     ploud.append([siz, zsiz, dim_mid])
+                     try:
+
                         #labels = list(data.keys())
-                        raw_data = raw_data / 255
-                        print(raw_data[0])
-                        namedir="./Autoenco5/test_ae_nblayer=" +str(siz) + "_zsize=" + str(zsiz) + "dim_mid=" + str(dim_mid) +'/'
+
+
+                        namedir="./LaNuit/dim_midvar/test_ae_nblayer=" +str(siz) + "_zsize=" + str(zsiz) + "dim_mid=" + str(dim_mid) +'/'
                         os.makedirs(namedir, exist_ok=True)
                         # # building the autoencoder
                         #autoencoder = build_autoencoder(raw_data.shape[1:])
+                        #autoencoder, enco = build_autoencoder_1(raw_data.shape[1:], zsiz)
                         autoencoder, enco = build_autoencoder_3(raw_data.shape[1:], nlayers=siz, zsize=zsiz, finaldim=dim_mid)
                         #autoencoder.summary()
                         autoencoder.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError())
-                        # autoencoder.summary()
-                        #train_autoenc(autoencoder, data=raw_data, epochs=20000, patience=100)
+                        autoencoder.summary()
+                        # #train_autoenc(autoencoder, data=raw_data, epochs=200, patience=100)
 
                         #getting the encoder
                         #autoencoder = keras.models.load_model(namedir + './best_model.h5')
-                        keras.utils.plot_model( autoencoder, to_file=namedir +"autoenco.png", show_shapes=True, show_layer_names=True)
-                        batchsize = 1000
-                        train_with_big_ds(autoencoder, data, batchsize, namedir)
+                        #keras.utils.plot_model( autoencoder, to_file=namedir +"autoenco.png", show_shapes=True, show_layer_names=True)
 
-                        res = predict_with_big_ds(enco, rd, labels, batchsize)
-                        np.save(IMG_DIR + '../pa'+str(ploud), res)
-                        # plt.clf()
-                        # ax = plt.subplot(111)
+                        batchsize = 2000
+                        train_with_big_ds(autoencoder, data, batchsize, namedir, 200)
+
+                        enco = split_autencoder(autoencoder)
+
+                        res = predict_with_big_ds(enco, raw_data, labels, batchsize)
+                        ploud[-1]+= baricenters(res, term)
+
+
+                        np.save(namedir +'res', res)
+                        plt.clf()
+                        ax = plt.subplot(111)
                         # print(len(res))
-                        ploud+=1
-                        for k, i in res.items():
-                            final[k]=i
-                        # get_UMAP(res, ax, nb_clust, get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD), nb_limit=500)
-                        # plt.savefig(namedir + "UMAP.png", format="png")
-                     # except Exception as e:
-                     #     print(e)
-                     #     final.append(namedir)
-                     #     pass
+                        get_UMAP(res, ax, nb_clust, get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD), nb_limit=1000)
+                        plt.savefig(namedir + "UMAP.png", format="png")
+
+                     except Exception as e:
+                         print(e)
+                         final.append(namedir)
+
+                     finally :
+                        with open("./LaNuit/res3.csv", 'a') as f:
+                            wcsv = csv.writer(f, delimiter="\t")
+                            # read the first line that holds column labels
+                            wcsv.writerow(ploud[-1])
+
 
 
             #os.rename('best_model_'+str(i)+ '.h5', 'best_model_'+ autoencoder.name + "_" + str(LOD)+ str(ptch_size) + '.h5')
@@ -432,8 +504,6 @@ if __name__ == '__main__':
                     # enco = split_autencoder(autoencoder)
                     # # keras.utils.plot_model(enco, "enco.png")
                     # enco.summary()
-
-        np.save(IMG_DIR + '../double_predicted', final)
                 # visual evaluation
                 # orig, ev = evaluate_network(list(raw_data), autoencoder)
                 # show_evaluation(orig, ev)

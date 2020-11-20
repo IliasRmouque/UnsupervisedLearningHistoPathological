@@ -28,6 +28,7 @@ class Patch:
         self.row = row
         self.column = column
         self.size = size
+        self.term= ""
         self.img = None
 
         #TODO: Find a way to initialise properly
@@ -63,7 +64,7 @@ def show_colors(IMG_DIR):
     i=0
     for f in fileNameList:
         i+=1
-        # if i > 2000: break
+        if i > 2000: break
         img= np.asarray(Image.open(IMG_DIR+f))
         img= np.mean(img, axis=(0, 1))
         X = img[0]
@@ -83,12 +84,12 @@ def show_colors(IMG_DIR):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ax.scatter(lc[:, 0], lc[:, 1],lc[:, 2], c=lc/255)
-    # from scipy.linalg import norm
-    # # X = np.arange(1, 256, 10)
-    # # Y = np.arange(1, 256, 10)
-    # # X, Y = np.meshgrid(X, Y)
-    # # p = 1.04
-    # # Z = (X (sqrt(2))/(2)-((Y)/(2))+(Z)/(2))^(2)+(X (sqrt(2))/(2)+(Y)/(2)-((Z)/(2)))^(2)
+    from scipy.linalg import norm
+    X = np.arange(1, 256, 10)
+    Y = np.arange(1, 256, 10)
+    X, Y = np.meshgrid(X, Y)
+    p = 1.04
+    Z = (-0.5*(X**2) -0.5*(Y**2)+X*Y+ 35*X+35*Y)/49.5
     # origin = np.array([0, 0, 0])
     # # axis and radius
     # p0 = np.array([1, 1, 1])*255
@@ -118,13 +119,13 @@ def show_colors(IMG_DIR):
     # # generate coordinates for surface
     # X, Y, Z = [p0[i] + v[i] * t + R * np.sin(theta) * n1[i] + R * np.cos(theta) * n2[i] for i in [0, 1, 2]]
     # ax.plot_surface(X, Y, Z)
-    # # from matplotlib import cm
-    # ax.plot_surface(X, Y, Z, linewidth=1, antialiased=False)
-    # #ax.plot_surface(Z, X, Y, linewidth=1, antialiased=False)
-    # # ax.plot_surface(Y, X, Z, linewidth=1, antialiased=False)
-    # ax.set_ylim(0, 255)
-    # ax.set_xlim(0, 255)
-    # ax.set_zlim(0, 255)
+    # from matplotlib import cm
+    ax.plot_surface(X, Y, Z, linewidth=1, antialiased=False)
+    #ax.plot_surface(Z, X, Y, linewidth=1, antialiased=False)
+    # ax.plot_surface(Y, X, Z, linewidth=1, antialiased=False)
+    ax.set_ylim(0, 255)
+    ax.set_xlim(0, 255)
+    ax.set_zlim(0, 255)
 
     plt.show()
 
@@ -139,8 +140,8 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
     :param source_img_name: name of
     :return:an array with all the numpy array corresponding to the chosen patches (might be slightly less than the number of required samples depending on image quality)
     """
-
-
+    show_colors(IMG_DIR)
+    exit(0)
     w, h = img.dimensions
     print(source_img_name + " width=" + str(w) + " height=" + str(h) + "number of patches:" + str(h//IMG_SIZE*w//IMG_SIZE))
     nArrayRes=[]
