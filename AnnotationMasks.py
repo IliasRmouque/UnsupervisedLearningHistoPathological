@@ -10,43 +10,10 @@ from cytomine.models import  AnnotationCollection,  ImageInstanceCollection
 from cytomine import Cytomine
 
 host = "http://cytomine.icube.unistra.fr"
-public_key = "8a00e26-3bcb-4229-b31d-a2b5937c4e5e"  # check your own keys from your account page in the web interface
-private_key = "c018f6a-8aa1-4791-957b-ab72dce4238d"
+public_key = "8da00e26-3bcb-4229-b31d-a2b5937c4e5e"  # check your own keys from your account page in the web interface
+private_key = "c0018f6a-8aa1-4791-957b-ab72dce4238d"
 
-
-if __name__ == '__main__':
-    parser = ArgumentParser(prog="Cytomine Python client example")
-
-    parser.add_argument('--proj_id', dest='id_project',
-                        help="The project from which we want the annotations")
-
-    parser.add_argument('--img_id', dest='id_image',
-                        help="The images from which we want the annotations")
-
-    parser.add_argument('--dest', dest='dest', required=False,
-                        help="Where to store images")
-
-    parser.add_argument('--downscale',dest='down', required=False,
-                        help="the downscale factor, 10 if not given")
-
-    params, other = parser.parse_known_args(sys.argv[1:])
-
-    '--proj_id 1345 --img_id 6522463 --dest ./ploud/ --downscale 100'
-
-
-    with  Cytomine(host=host, public_key=public_key, private_key=private_key,
-              verbose=logging.INFO) as cytomine:
-
-        if params.down:
-            scale_factor = 1 / int(params.down)
-        else :
-            scale_factor = 1 / 10
-        proj_id = int(params.id_project)
-        image_id = int(params.id_image)
-        if params.dest:
-            os.makedirs(params.dest, exist_ok=True)
-
-
+def get_images_mask_per_annotation_per_user(proj_id, image_id, user_id, scale_factor, dest ):
         im = ImageInstanceCollection()
         im.project =proj_id
         im.image = image_id
@@ -58,8 +25,8 @@ if __name__ == '__main__':
         annotations = AnnotationCollection()
         annotations.project = proj_id
         annotations.image = image_id
-        # if needed
-        # annotations.user = user_id
+
+        annotations.user = user_id
         annotations.showWKT = True
         annotations.showMeta = True
         annotations.showTerm = True
@@ -70,6 +37,7 @@ if __name__ == '__main__':
 
         dct_anotations = {}
         for a in annotations:
+            print(a.user)
             if len(a.term) == 1:
                 term = a.term[0]
                 if term not in dct_anotations:
@@ -114,6 +82,48 @@ if __name__ == '__main__':
                     ImageDraw.Draw(result_image).polygon(coords, outline=1, fill=1)
 
             result_image.save(params.dest + '/' + str(t)+'.png')
+
+if __name__ == '__main__':
+    parser = ArgumentParser(prog="Cytomine Python client example")
+
+    parser.add_argument('--proj_id', dest='id_project',
+                        help="The project from which we want the annotations")
+
+    parser.add_argument('--img_id', dest='id_image',
+                        help="The images from which we want the annotations")
+
+    parser.add_argument('--user', dest='user',
+                        help="The user from which we want the annotations")
+
+    parser.add_argument('--dest', dest='dest', required=False,
+                        help="Where to store images")
+
+
+    parser.add_argument('--downscale',dest='down', required=False,
+                        help="the downscale factor, 10 if not given")
+
+    params, other = parser.parse_known_args(sys.argv[1:])
+
+
+
+
+    with  Cytomine(host=host, public_key=public_key, private_key=private_key,
+              verbose=logging.INFO) as cytomine:
+
+        if params.down:
+            scale_factor = 1 / int(params.down)
+        else :
+            scale_factor = 1 / 10
+        proj_id = int(params.id_project)
+        image_id = int(params.id_image)
+        user_id = int(params.user)
+        if params.dest:
+            os.makedirs(params.dest, exist_ok=True)
+
+        get_images_mask_per_annotation_per_user(proj_id, image_id, user_id, scale_factor, params.dest)
+
+
+
 
 
 
