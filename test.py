@@ -20,6 +20,7 @@ import shapely.wkt
 from cytomine import Cytomine
 from cytomine.models import AnnotationCollection
 from patches import Patch
+from utils.path import *
 
 host = "http://cytomine.icube.unistra.fr"
 public_key = "8da00e26-3bcb-4229-b31d-a2b5937c4e5e"  # check your own keys from your account page in the web interface
@@ -30,6 +31,25 @@ term ={
 }
 
 if __name__ == '__main__':
+    with Cytomine(host=CYTO_HOST, public_key=CYTO_PUB_KEY, private_key=CYTO_PRV_KEY,
+                    verbose=logging.INFO) as cytomine:
+          annotations = AnnotationCollection()
+          annotations.project = "1345"
+          annotations.showWKT = True
+          annotations.showMeta = True
+          annotations.showTerm = True
+          annotations.showGIS = True
+          annotations.fetch()
+          print(annotations)
+
+          f = open("./anno.csv", "w+")
+          f.write("ID;Image;Project;Term;User;Area;Perimeter;WKT;TRACK \n")
+          for annotation in annotations:
+                   f.write("{};{};{};{};{};{};{};{}\n".format(annotation.id, annotation.image, annotation.project,
+                                                            annotation.term, annotation.user, annotation.area,
+                                                           annotation.perimeter, annotation.location))
+
+    exit(0)
     import time
     from main import *
 

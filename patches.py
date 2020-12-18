@@ -1,20 +1,23 @@
+import csv
 import os
 import time
 from math import sqrt
 
-import psutil
-from random import randint
+# import psutil
+from random import randint, sample
 
 import numpy as np
 import imageio
 from PIL import Image
 from openslide import ImageSlide, open_slide
 from os import listdir, mkdir, wait
-from utils.path import IMG_DIR, PTCH_DIR
+from utils.path import IMG_DIR, PTCH_DIR, get_ALL_PATCHES_DIR, List_IMAGES, ptch_size, LOD
 import sys
 import matplotlib.pyplot as plt
 #from mpl_toolkits.mplot3d import Axes3D
+import PIL.Image
 
+PIL.Image.MAX_IMAGE_PIXELS = None
 IMG_SIZE=64
 
 
@@ -179,42 +182,141 @@ def cutPatches(img, source_img_name, number_of_samples=1000):
 
 def get_file_name_list():
     pass
-if __name__ == '__main__':
-    show_colors('./../PyHIST/output/H110029662_-_2019-02-27_16.20.10/H110029662_-_2019-02-27_16.20.10_tiles/')
-    exit(0)
-    import PIL.Image
-    PIL.Image.MAX_IMAGE_PIXELS = None
-    for dname in listdir(IMG_DIR + '../../'):
-        if "H11002875" in dname:
-            cpt=0
-            for files in listdir(IMG_DIR + '../../' + dname +'/' +dname[:32] + '_tiles'):
-                img = np.asarray(Image.open(IMG_DIR + files))
-                img = np.mean(img, axis=(0, 1) )
-                X = img[0]
-                Y = img[1]
-                Z = img[2]
 
-                p = 1.04
 
-                if Z > (np.power(np.subtract(X * np.cos(p), Y * np.sin(p)), 2)) / -40 + (X * np.sin(p) + Y * np.cos(p)):
-                    if not (Y < (X + Z - 10) / 2.1):
-                        cpt+=1
-                        os.remove(IMG_DIR + '../../' + dname +'/' +dname[:32] + '_tiles' +'/'+ files)
-            print(cpt, "filed removed in ", dname)
+def clear_patches(current_dir):
+    print(current_dir)
+    for files in listdir(current_dir):
+        print(current_dir +'/'+ files)
+        if os.path.isdir(current_dir +'/'+ files) and files[-5:] == "tiles":
+            patches_dir = current_dir +'/'+ files
+            break
 
-    # pass
-    for dname in listdir(IMG_DIR + '../../'):
-        fileNameList = listdir(IMG_DIR + '../../'+dname +'/' +dname[:32] + '_tiles' +'/')
+
+    lfiles =[]
+    for files in listdir(patches_dir):
+        img = np.asarray(Image.open(patches_dir +'/'+files))
+        img = np.mean(img, axis=(0, 1))
+        X = img[0]
+        Y = img[1]
+        Z = img[2]
+        p = 1.04
+        if (Z > (np.power(np.subtract(X * np.cos(p), Y * np.sin(p)), 2)) / -40 + (X * np.sin(p) + Y * np.cos(p))) or not (Y < (X + Z - 10) / 2.1):
+                os.remove(patches_dir +'/'+ files)
+        else:
+                lfiles.append(files)
+
+    listTile=[]
+    with open(current_dir + "/tile_selection.tsv") as f:
+        rcsv = csv.reader(f, delimiter="\t")
+        # read the first line that holds column labels
+        csv_labels = rcsv.__next__()
+        for record in rcsv:
+            if record[3] == '1' and record[0] + ".png" in lfiles :
+                listTile.append(record)
+
+        with open(current_dir + "/tile_selection2.tsv", 'w') as f2:
+            wcsv= csv.writer(f2, delimiter="\t")
+            wcsv.writerow(csv_labels)
+            for record in listTile:
+                wcsv.writerow(record)
+    f = {}
+    for name in listdir(patches_dir):
+        if name[-4:] == ".png":
+            img = imageio.imread(patches_dir +'/'+ name)
+            f[name] = img.copy()
+
+    np.save(current_dir + '/patchesArray.npy', f)
+
+
+def makes_all_patches(lod, size):
+    for i in range(3):
+        dir = get_ALL_PATCHES_DIR(lod, size)
+        ld = listdir(dir)
+        list_patch = sample(ld, min(20000, len(ld)) )
         f = {}
-        g = {}
-        print(len(fileNameList))
-        if True: #not os.path.isfile(IMG_DIR + '../../'+ dname +'/patchesArray.npy'):
-            for name in fileNameList:
-                if name[-4:] == ".png":
-                    img = imageio.imread(IMG_DIR + '../../'+dname +'/' +dname[:32] + '_tiles' +'/'+ name)
-                    f[name] = img.copy()
+        for name in list_patch:
+            if name[-4:] == ".png":
+                img = imageio.imread(dir + '/' + name)
+                f[name] = np.asarray(img.copy())
+        np.save(dir + '/patchesArray' +str(i) + '.npy', f)
 
 
-            np.save(IMG_DIR + '../../'+ dname +'/patchesArray.npy', f)
+def makes_all_patches_treshold(lod, size):
+    for i in range(3):
+        dir = get_ALL_PATCHES_DIR(lod, size)
+        ld = listdir(dir)
+        list_patch = sample(ld, min(20000, len(ld)) )
+        f = {}
+        c = 0
+
+        for name in list_patch:
+            c += 1
+            print(c, '/', len(ld))
+            if name[-4:] == ".png":
+                img = Image.open(dir + '/' + name)
+                img = img.convert("L")
+                img = img.point(lambda p: p > 115 and 255)
+                f[name] = np.asarray(to_3d(np.asarray(img)))
+        np.save(dir + '/patchesArray_treshold' +str(i) + '.npy', f)
+
+def to_3d(img):
+    res=[]
+    for i in img:
+        res.append([])
+        for j in i:
+            res[-1].append([j])
+    return res
+
+
+def makes_img_ptch_treshold(dir):
+        ld = listdir(dir)
+        f = {}
+        i=0
+        for name in ld:
+            i+=1
+            print(i, '/', len(ld))
+            if name[-4:] == ".png":
+                img = Image.open(dir + '/' + name)
+                img = img.convert("L")
+                img = img.point(lambda p: p > 115 and 255)
+                f[name] = np.asarray(to_3d(np.asarray(img)))
+        np.save(dir + '../patchesArray_treshold'+ '.npy', f)
+
+
+if __name__ == '__main__':
+    import sys
+
+
+    for IMG_ID, IMG_NAME in List_IMAGES:
+        IMG_DIR = './../Images/Patches/' + IMG_NAME + '_' + str(ptch_size) \
+                  + "_LOD=" + str(LOD) + '/' + IMG_NAME + '_tiles/'
+        makes_img_ptch_treshold(IMG_DIR)
+    makes_all_patches_treshold(8, 128)
+    print("\n\n\n\n\n\n\n\n\n\n\n")
+    #clear_patches("/home/rmouque/Bureau/Images/Patches/A17-7275_-_2019-11-06_15.25.13_128_LOD=8")
+    #clear_patches(sys.argv[1])
+
+
+
+    # for dname in listdir(IMG_DIR + '../../'):
+    #     if "H11002875" in dname:
+    #         cpt=0
+    #
+    #
+    # # pass
+    # for dname in listdir(IMG_DIR + '../../'):
+    #     fileNameList = listdir(IMG_DIR + '../../'+dname +'/' +dname[:32] + '_tiles' +'/')
+    #     f = {}
+    #     g = {}
+    #     print(len(fileNameList))
+    #     if True: #not os.path.isfile(IMG_DIR + '../../'+ dname +'/patchesArray.npy'):
+    #         for name in fileNameList:
+    #             if name[-4:] == ".png":
+    #                 img = imageio.imread(IMG_DIR + '../../'+dname +'/' +dname[:32] + '_tiles' +'/'+ name)
+    #                 f[name] = img.copy()
+    #
+    #
+    #         np.save(IMG_DIR + '../../'+ dname +'/patchesArray.npy', f)
 
 

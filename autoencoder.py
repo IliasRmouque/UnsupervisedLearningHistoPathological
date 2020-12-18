@@ -169,11 +169,11 @@ def build_autoencoder2(img_shape):
     decoded = Activation('sigmoid')(x)
     return keras.Model(input_img, decoded, name="basic_no_dense_128")
 
-def build_autoencoder_3(img_shape, nlayers, zsize, finaldim):
+def build_autoencoder_3(img_shape, nlayers, zsize, dim_mid):
     input_img = Input(shape=img_shape)
     x=input_img
     for i in range(nlayers):
-        x = Conv2D(finaldim*2**(nlayers-i-1), (nlayers-i+1, nlayers-i+1), padding='same')(x)
+        x = Conv2D(dim_mid * 2 ** (nlayers - i - 1), (nlayers - i + 1, nlayers - i + 1), padding='same')(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
         x = MaxPooling2D((2, 2), padding='same')(x)
@@ -192,11 +192,11 @@ def build_autoencoder_3(img_shape, nlayers, zsize, finaldim):
     x = Dense(shape[1] * shape[2] * shape[3], activation='relu')(x)
     x = Reshape((shape[1], shape[2], shape[3]))(x)
     for i in range(nlayers):
-        x = Conv2D(finaldim*2**(i), ( 2+i, 2+i), padding='same')(x)
+        x = Conv2D(dim_mid * 2 ** (i), (2 + i, 2 + i), padding='same')(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
         x = UpSampling2D((2, 2))(x)
-    x = Conv2D(3, (3, 3), padding='same')(x)
+    x = Conv2D(img_shape[-1], (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     decoded = Activation('sigmoid')(x)
     return keras.Model(input_img, decoded, name="basic_dense_128"), encoder
@@ -282,6 +282,41 @@ def split_autencoder(autoencoder):
         encoder_model = layer(encoder_model)
     encoder_model = keras.Model(inputs=encoder_input, outputs=encoder_model)
     return encoder_model
+
+def train_with_big_ds_normalized(autoencoder, data, batchsize, namedir, epochs= 100):
+    nbBatch = len(list(data.values())) // batchsize + 1  # number of batch of size 100000 (easily predictable)
+    print("there will be {} trainings".format(nbBatch))
+    history = False
+    for i in range(epochs):
+        for i in range(0, nbBatch):
+            raw_data = np.asarray(list(data.values())[i * batchsize: (i + 1) * batchsize]) / 255
+            if not history:
+                history = train_autoenc(autoencoder, data=raw_data, epochs= 1, patience=100, plot=False,
+                                        fName=namedir + 'best_model.h5')
+            else:
+                orig, ev = evaluate_network(list(raw_data), autoencoder)
+                show_evaluation(orig, ev, title=namedir + "sub_batch:" + str(i))
+                hist_temp = train_autoenc(autoencoder, data=raw_data, epochs= 1, patience=20, plot=False,
+                                          fName=namedir + 'best_model.h5')
+                for k in hist_temp.history.keys():
+                    history.history[k] += hist_temp.history[k]
+
+        plt.clf()
+        plt.plot(history.history['loss'], label='train')
+        plt.plot(history.history['val_loss'], label='validation')
+        plt.legend()
+        plt.savefig(namedir + "history.png")
+    with open("./ploud.csv", 'a') as f:
+        a = [namedir]
+        a.append(history.history['loss'][-1])
+        a.append(history.history['val_loss'][-1])
+        a.append(history.history['test'][-1])
+        rcsv = csv.writer(f)
+        rcsv.writerow(a)
+
+
+
+
 
 def train_with_big_ds(autoencoder, data, batchsize, namedir, epochs= 100):
     nbBatch = len(list(data.values())) // batchsize + 1  # number of batch of size 100000 (easily predictable)
@@ -376,7 +411,7 @@ def baricenters( pred, termlist):
     import clustering
     if cpt != t:
         for nb_clust in [7,8,9,10]:
-            resc, _ = clustering.make_clusters_2(np.asarray(toClust), nb_clust)
+            resc, _ = clustering.make_clusters_KMeans(np.asarray(toClust), nb_clust)
             unique, counts = np.unique(resc, return_counts=True)
 
             predt = resc[np.where(np.asarray(real)==coltum)]
@@ -436,9 +471,8 @@ if __name__ == '__main__':
     ploud=[]
     # loading data
     for LOD in [LOD]:# 2, 4, 8, 16]:
-        IMG_DIR = './../PyHIST/output/' + IMG_NAME + '_' + str(ptch_size) + '*' + str(ptch_size) \
-              + "_LOD=" + str(LOD) + '/' + IMG_NAME + '_tiles/'
-        data = (np.load(IMG_DIR + "../patchesArray.npy", allow_pickle=True))
+        ptc_dir = get_ALL_PATCHES_DIR(LOD, ptch_size)
+        data = (np.load(ptc_dir + "/patchesArray_treshold0.npy", allow_pickle=True))
         raw_data, labels = process_data(data)
         data = dict(zip(labels, raw_data))
         term = get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD)
@@ -447,52 +481,60 @@ if __name__ == '__main__':
 
         raw_data = np.asarray(list(data.values()))
         raw_data = raw_data / 255
-        for siz in [2]:
-            for zsiz in [50]:
-                for dim_mid in range(1, 32, 2):
-                     ploud.append([siz, zsiz, dim_mid])
-                     try:
+        for siz in [4]:
+            for zsiz in [500]:
+                for dim_mid in [10]:
+                 for __ in range(1):
+                    ploud.append([siz, zsiz, dim_mid])
 
-                        #labels = list(data.keys())
+                    experience = "tresh"
+                    #labels = list(data.keys())
+
+                    namedir= "./best_autoenco_tresh/"
+                    #namedir="./LaNuit/"+ experience+"/test_ae_nblayer=" +str(siz) + "_zsize=" + str(zsiz) + "dim_mid=" + str(dim_mid) +'/'
+                    os.makedirs(namedir, exist_ok=True)
+                    # # building the autoencoder
+                    #autoencoder = build_autoencoder(raw_data.shape[1:])
+                    #autoencoder, enco = build_autoencoder_1(raw_data.shape[1:], zsiz)
+                    autoencoder, enco = build_autoencoder_3(raw_data.shape[1:], nlayers=siz, zsize=zsiz, dim_mid=dim_mid)
+                    #autoencoder.summary()
+                    autoencoder.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError())
+                    autoencoder.summary()
+                    #train_autoenc(autoencoder, data=raw_data, epochs=200, patience=100)
+
+                    batchsize = 500
+                    #train_with_big_ds(autoencoder, data, batchsize, namedir, 200)
+
+                    #getting the encoder
+                    autoencoder = keras.models.load_model(namedir + './best_model.h5')
+                    keras.utils.plot_model( autoencoder, to_file=namedir +"autoenco.png", show_shapes=True, show_layer_names=True)
 
 
-                        namedir="./LaNuit/dim_midvar/test_ae_nblayer=" +str(siz) + "_zsize=" + str(zsiz) + "dim_mid=" + str(dim_mid) +'/'
-                        os.makedirs(namedir, exist_ok=True)
-                        # # building the autoencoder
-                        #autoencoder = build_autoencoder(raw_data.shape[1:])
-                        #autoencoder, enco = build_autoencoder_1(raw_data.shape[1:], zsiz)
-                        autoencoder, enco = build_autoencoder_3(raw_data.shape[1:], nlayers=siz, zsize=zsiz, finaldim=dim_mid)
-                        #autoencoder.summary()
-                        autoencoder.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError())
-                        autoencoder.summary()
-                        # #train_autoenc(autoencoder, data=raw_data, epochs=200, patience=100)
 
-                        #getting the encoder
-                        #autoencoder = keras.models.load_model(namedir + './best_model.h5')
-                        #keras.utils.plot_model( autoencoder, to_file=namedir +"autoenco.png", show_shapes=True, show_layer_names=True)
-
-                        batchsize = 2000
-                        train_with_big_ds(autoencoder, data, batchsize, namedir, 200)
-
-                        enco = split_autencoder(autoencoder)
-
+                    enco = split_autencoder(autoencoder)
+                    for IMG_ID, IMG_NAME in List_IMAGES :
+                        IMG_DIR = './../Images/Patches/' + IMG_NAME + '_' + str(ptch_size) \
+                                  + "_LOD=" + str(LOD) + '/' + IMG_NAME + '_tiles/'
+                        data = (np.load(IMG_DIR + "../patchesArray_treshold.npy", allow_pickle=True))
+                        raw_data, labels = process_data(data)
+                        data = dict(zip(labels, raw_data))
                         res = predict_with_big_ds(enco, raw_data, labels, batchsize)
                         ploud[-1]+= baricenters(res, term)
 
+                        np.save(IMG_DIR +'/../rest', res)
 
-                        np.save(namedir +'res', res)
-                        plt.clf()
-                        ax = plt.subplot(111)
-                        # print(len(res))
-                        get_UMAP(res, ax, nb_clust, get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD), nb_limit=1000)
-                        plt.savefig(namedir + "UMAP.png", format="png")
 
-                     except Exception as e:
-                         print(e)
-                         final.append(namedir)
+                    plt.clf()
+                    ax = plt.subplot(111)
+                    # print(len(res))
+                    IMG_SIZE = [ceil(IMG_SIZE[0] / LOD), ceil(IMG_SIZE[1] / LOD)]
+                    # get_UMAP(res, ax, nb_clust, get_termlist(dct_patch, mask_type, 0, IMG_SIZE, LOD), nb_limit=1000)
+                    # plt.savefig(namedir + "UMAP.png", format="png")
 
-                     finally :
-                        with open("./LaNuit/res3.csv", 'a') as f:
+
+
+
+                    with open("./LaNuit/" + experience+".csv", 'a') as f:
                             wcsv = csv.writer(f, delimiter="\t")
                             # read the first line that holds column labels
                             wcsv.writerow(ploud[-1])

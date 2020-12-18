@@ -1,18 +1,22 @@
 import csv
 import tempfile
-from math import ceil, floor
+from math import ceil
 
 from random import sample
-from sklearn.metrics import adjusted_mutual_info_score, normalized_mutual_info_score
+from sklearn.metrics import adjusted_mutual_info_score, normalized_mutual_info_score, homogeneity_score, completeness_score, v_measure_score
 from matplotlib.offsetbox import TextArea, DrawingArea, OffsetImage, AnnotationBbox
 from sklearn.preprocessing import StandardScaler
 from shapely import wkt
+from shapely.geometry import Polygon
 from matplotlib import pyplot as plt
 from descartes.patch import PolygonPatch
-from utils.path import *
+from matplotlib.colors import hsv_to_rgb
+
+import utils.path as path
 from draw_res_image import draw_res_image, draw_origin_image
 from patches import Patch
-from matplotlib.colors import hsv_to_rgb
+from ensemble import  ensemble_clustering
+from data_manipulation import process_data, flatten_raw_data
 
 import umap
 import imageio
@@ -118,289 +122,24 @@ def clustering_and_img_drawin(image_size, dct_patch, IMG_DIR, nb_clust = 12, res
     img.close()  # suuuuuuuper important
 
 
-def ultimate_method_from_this_bogoss_wemmert(dClasses, nmethods, nclasses ,th=0.5):
-    transition = [[[0] * nclasses[i] for _ in range(nmethods)] for i in range(nmethods)]
-    stats = {}
-    best = {}
-    for i in range(nmethods):
-        for j in range(nmethods):
-            tab_cpt = [[0] * nclasses[j] for _ in range(nclasses[i])]
-            if i!=j:
-                for nom, cpt in dClasses.items():
-                    tab_cpt[nom[i]][nom[j]] += cpt
-                for k in range(nclasses[i]):
-                    transition[i][j][k] = tab_cpt[k].index(max(tab_cpt[k]))
 
-    for  nom , cpt in dClasses.items():
-        stats[nom]= 0
-        vote = [[0] * nclasses[j] for j in range(nmethods)]
-        for i in range(nmethods):
-            k = nom[i]
-            vote[i][k]+=cpt
-            for j in range(nmethods):
-               if j != i:
-                    km = transition[i][j][k]
-                    kj = nom[j]
-                    vote[j][km]+=cpt
-                    if kj == km:
-                        stats[nom]+=cpt
-        maxi=(0,0)
-        vmax=0
-        for i in range(nmethods):
-            for j in range(nclasses[i]):
-              if vmax<vote[i][j]:
-                   vmax = vote[i][j]
-                   maxi=(i,j)
-        best[nom]= maxi
-    fr={}
-    corr=[]
-    for  nom , cpt in dClasses.items():
-        stats[nom]= stats[nom]/nmethods
-        if stats[nom] >= nmethods*(1- th):
-            if best[nom][0]+best[nom][1]*nmethods not in corr:
-                corr.append(best[nom][0]+best[nom][1]*nmethods)
-            fr[nom] = corr.index(best[nom][0]+best[nom][1]*nmethods)
-    return fr, len(corr)
+def ensemble_clustering_and_img_drawing(image_size, patch_size, listLod, listClusters, listMethods,  seuil=0.5, terminaison='', namefolder='./',suffixe=''  ):
+    for i in range(10):
+        dct_lower_res, dimg, color, size = ensemble_clustering(image_size, patch_size, listLod, listClusters, listMethods,  seuil)
+        mask_type = load_annotations("./annoWeird.csv", "./anno.csv", path.IMG_ID, color)
+        a = data_visualisation(color, mask_type, dct_lower_res, size, min(listLod), path.IMG_ID, terminaison=terminaison,
+                       namefolder=namefolder, suffixe=suffixe)
 
-
-def ensemble_clustering(image_size, patch_size, listLod, listClusters,  seuil=0.6, terminaison='', namefolder='./',suffixe=''  ):
-    pix_clust =[ [[] for _ in range(image_size[0]//(patch_size*listLod[0]))] for __ in range(image_size[1]//(patch_size*listLod[0])) ]
-    dct_lower_res = None
-    lg = zip(listLod, listClusters)
-    for LOD, clust in lg:
-     for ds in[0,1]:
-        print(LOD, clust)
-        IMG_DIR = './../PyHIST/output/' + IMG_NAME + '_' + str(ptch_size) + '*' + str(ptch_size) \
-              + "_LOD=" + str(LOD) + '/' + IMG_NAME + '_tiles/'
-        dct_patch ={}
-        with open(IMG_DIR + "../tile_selection2.tsv") as f:
-            rcsv = csv.reader(f, delimiter="\t")
+        with open(namefolder + "val.csv", 'a') as f:
+            wcsv = csv.writer(f, delimiter="\t")
             # read the first line that holds column labels
-            csv_labels = rcsv.__next__()
-            for record in rcsv:
-                if record[3] == '1':
-                    dct_patch[record[0]] = Patch(record[0], size=ptch_size, row=int(record[4]), column=int(record[5]))
-        if dct_lower_res is None:
-            dimg = IMG_DIR
-            dct_lower_res = dct_patch.copy()
-        data = np.load(IMG_DIR + "../pa"+str(ds)+".npy", allow_pickle=True)
-        raw_data, labels = process_data(data)
-        raw_data = flatten_raw_data(raw_data)
-        labels = labels
-
-
-        data = dict(zip(labels, raw_data))
-        a, _ = clustering.make_clusters_2(raw_data, clust, 110000)
-
-        dct_col = dict(zip(labels, a))
-        maxi = 0
-
-        for l, c in dct_col.items():
-
-            ptc = dct_patch[l[:-4]]
-            xo = (ceil(ptc.get_pos()[0]) // patch_size * (LOD // listLod[0]))
-            yo = (ceil(ptc.get_pos()[1]) // patch_size * (LOD // listLod[0]))
-            for i in range(LOD//listLod[0]):
-                for j in range(LOD//listLod[0]):
-                    pix_clust[yo +i][xo +j].append(c)
-            if len(pix_clust[yo][xo]) > maxi:
-                maxi= len(pix_clust[yo][xo])
-
-
-    res = {}
-    for l in pix_clust:
-        for c in l:
-            if len(c) == maxi:
-                if tuple(c) not in res:
-                    res[tuple(c)] = 0
-                res[tuple(c)]+=1
-
-    LOD = listLod[0]
-    image_size = [ceil(image_size[0] // LOD), ceil(image_size[1] // LOD)]
-    # clustering_and_img_drawin(image_size, dct_lower_res, dimg, color, res_name=namefolder + "dessin",
-    #                           thumb_size=(2500, 2500))
-
-    # def ptree(start, tree, indent_width=4, ):
-    #
-    #     def _ptree(start, parent, tree, grandpa=None, indent=""):
-    #         if parent != start:
-    #             if grandpa is None:  # Ask grandpa kids!
-    #                 print(parent,':',res[parent], end="")
-    #             else:
-    #                 print(parent,':',res[parent])
-    #         if parent not in tree:
-    #             return
-    #         for child in tree[parent][:-1]:
-    #             print(indent + "├" + "─" * indent_width, end="")
-    #             _ptree(start, child, tree, parent, indent + "│" + " " * 4)
-    #         child = tree[parent][-1]
-    #         print(indent + "└" + "─" * indent_width, end="")
-    #         _ptree(start, child, tree, parent, indent + " " * 5)  # 4 -> 5
-    #
-    #     parent = start
-    #     _ptree(start, parent, tree)
-    #
-    #
-    # tmp = res.copy()
-    # tree = {tuple(): []}
-    # for i in range(maxi+1):
-    #     for c, nbr in tmp.items():
-    #         if c[0:i] not in res:
-    #             res[c[0:i]]=0
-    #         if i < maxi:
-    #             res[c[0:i]] += res[c]
-    #         # if i == 0 :
-    #         #     tree[c[0:i]]=[]
-    #         #     if c[0:i] not in tree[tupl]:
-    #         #         tree[-1].append(c[0:i])
-    #         # else:
-    #         if i!=0:
-    #             if c[0:i - 1] not in tree:
-    #                 tree[c[0:i - 1]] = []
-    #             if c[0:i] not in tree[c[0:i-1]]:
-    #                 tree[c[0:i-1]].append(c[0:i])
-    #
-    #
-    #
-    # ptree(tuple(), tree)
-    #
-    # def rmClass(start, tree, val ):
-    #     def removeChilds(parent, tree):
-    #         for child in tree[parent]:
-    #             if child in tree:
-    #                 removeChilds(child, tree)
-    #         tree.pop(parent)
-    #
-    #
-    #
-    #     def clear(start, parent, tree, val, go=False, indent=""):
-    #         if go:
-    #             lchild = []
-    #             al = None
-    #             for child in tree[parent]:
-    #                 if val[child]/val[parent] > seuil:
-    #                     al = child
-    #                     break
-    #             if al is not None:
-    #                 for child in tree[parent][:]:
-    #                     if child in tree:
-    #                         removeChilds(child, tree)
-    #             else:
-    #                 for child in tree[parent][:]:
-    #                     if child in tree:
-    #                         clear(child, child, tree, val, True)
-    #         else:
-    #             for child in tree[parent][:]:
-    #                 clear(parent, child, tree, val, True)
-    #
-    #     parent = start
-    #     clear(start, parent, tree, val, True)
-    #
-    # print(len(tree))
-    # #ptree(tuple(), tree)
-    # rmClass(tuple(), tree ,res)
-    # ptree(tuple(), tree)
-    # #print(len(tree))
-    #
-    # leaves =[]
-    # for k, i in tree.items():
-    #     if i[0] not in tree:
-    #         leaves.append(k)
-    #
-    # # def grand_maraboutage_recursif(liste, chose, j, maxi):
-    # #     if len(chose)<maxi:
-    # #         if j<maxi:
-    # #             c = chose[:]
-    # #             grand_maraboutage_recursif(liste, c, j + 1, maxi)
-    # #             chose.append(j)
-    # #             grand_maraboutage_recursif(liste, chose, 0, maxi)
-    # #
-    # #     else :
-    # #         if chose not in liste:
-    # #             liste.append(chose)
-    # #
-    # #
-    #
-    # # color =-1
-    # # dct_col = {}
-    # # for l in leaves:
-    # #     color+=1
-    # #     pc = []
-    # #     grand_maraboutage_recursif(pc, list(l), 0, len(listLod))
-    # #     for c in pc:
-    # #         dct_col[tuple(c)]=color
-    # print(leaves)
-    # color = 0
-    # dct_col = {}
-    # for l in leaves:
-    #     dct_col[tuple(l)] = color
-    #     color += 1
-    # corr={}
-    # for nom in res.keys():
-    #     corr[nom]=nom
-    # Pnom = list(res.keys())
-    # for st in range(len(Pnom)):
-    #     for ne in range(len(Pnom)-st-1):
-    #         current=Pnom[st]
-    #         next=Pnom[st+ne+1]
-    #         cpt=0
-    #         for i in range(len(current)):
-    #             if current[i] == next[i]:
-    #                 cpt+=1
-    #         if cpt>= th *len(listLod):
-    #             corr[current]=next
-    #             break
-    #
-    # dct_col={}
-    # color=0
-    # for nom, c in corr.items():
-    #     if nom == c:
-    #         dct_col[nom]=color
-    #         color+=1
-    # for nom, c in corr.items():
-    #     cur= c
-    #     while corr[cur] != cur :
-    #         cur = corr[cur]
-    #     dct_col[nom]=dct_col[cur]
-
-
-
-
-
-
-
-
-
-    #  "Salut"
-    # # for i  in range(len(pix_clust)):
-    # #     for j  in range(len(pix_clust[i])):
-    # #         if len(pix_clust[i][j]) == maxi:
-    # #             pix_clust[i][j] = hsv_to_rgb([dct_col[tuple(pix_clust[i][j])] / color, 0.5, 1])
-    # #         else:
-    # #             pix_clust[i][j] = hsv_to_rgb([0, 0, 0])
-    # # print(np.asarray(pix_clust).shape)
-    # # img = Image.fromarray(np.asarray(pix_clust)*255, 'RGB')
-    # # img.save('./res.png')
-    # # plt.imshow(np.asarray(pix_clust), interpolation='nearest')
-    # # plt.show()
-    #
-
-    dct_col, color = ultimate_method_from_this_bogoss_wemmert(res, len(listLod), listClusters, th)
-    print(dct_col)
-    for p in dct_lower_res.values():
-        col = pix_clust[p.get_pos()[1]// patch_size][p.get_pos()[0]// patch_size]
-
-        if tuple(col) in  dct_col:
-            p.colour = dct_col[tuple(col)]
-        else:
-            p.colour = -1
-
-
-    clustering_and_img_drawin(image_size, dct_lower_res, dimg, color, res_name=namefolder+"dessin", thumb_size=(2500,2500))
-    mask_type = load_annotations("./annoWeird.csv", "./anno.csv", IMG_ID, color)
-    data_visualisation(color, mask_type, dct_lower_res, image_size, LOD, IMG_ID, terminaison=terminaison, namefolder=namefolder,suffixe=suffixe  )
-
-
+            wcsv.writerow(a)
+        # clustering_and_img_drawin(size, dct_lower_res, dimg, color, res_name=namefolder + "dessin",
+        #                                 thumb_size=(5000, 5000))
+    # if ARI<a[0]:
+    #     clustering_and_img_drawin(size, dct_lower_res, dimg, color, res_name=namefolder + "dessin",
+    #                               thumb_size=(2500, 2500))
+    #     ARI=a[0]
 
 
 
@@ -452,8 +191,15 @@ def data_visualisation( nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, img_id, t
                         real.append(term_score[j["Term"]]["Real"])
         except KeyError:
             pass
-    print("Pour", nb_clust, "clusters \nARI=", se, "\nNMI=",
-          normalized_mutual_info_score(real, pred))
+
+    # just show the
+    fig.set_size_inches(30, 15)
+    plt.title("coloration des zones déjà annotées" + terminaison)
+    plt.savefig(namefolder + "coloration_zones_annotées_" + terminaison + suffixe + ".png", format="png")
+    # ax.cla()
+
+    print("Pour", nb_clust, "clusters \nARI=", adjusted_mutual_info_score(real, pred), "\nNMI=",
+          normalized_mutual_info_score(real, pred), "\nhomogenitiy=", )
     predt=[]
     rt=[]
     for i in range(len(pred)):
@@ -462,38 +208,41 @@ def data_visualisation( nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, img_id, t
             rt.append(term_score["tumor"]["Real"])
     #True positive False_Positive for tumor
 
-    maxs=[0]*nClassest
-    t_colors=[-1]*nClassest
-    for i in range(nb_clust):
-        cpt = predt.count(i)
-        mem=i
-        for m in range(nClassest):
-            if maxs[m]<cpt:
-                b = t_colors[m]
-                t_colors[m] = mem
-                mem = b
-                a = maxs[m]
-                maxs[m] = cpt
-                cpt = a
-    cptf=0
-    cptt=0
-    for i in range(nClassest):
-        cptt += predt.count(t_colors[i])
-        cptf += pred.count(t_colors[i])
-    print(t_colors)
-    print(cptt)
-    print(len(predt))
-    vp = cptt
-    fp = cptf - cptt
-    vn = len(pred) - len(predt) - cptf + cptt
-    fn = len(predt) - cptt
 
-    print("vrai positif:", vp)
-    print("faux positif:", fp )
-    print("vrai négatif:", vn )
-    print("faux négatif:",fn)
-    print("sensibilité:", vp / (vp + fn))
-    print("spécificité:", vn / (vn + fp))
+    maxs=[]
+
+    for i in range(nb_clust):
+      if i in pred:
+        q=(predt.count(i)/pred.count(i))
+        if q>0.5:
+               maxs.append(i)
+
+    fsc, sens, spec = 0 ,0 ,0
+    if maxs:
+        cptf=0
+        cptt=0
+        for i in maxs:
+            cptt += predt.count(i)
+            cptf += pred.count(i)
+        print(maxs)
+        print(cptt)
+        print(len(predt))
+        vp = cptt
+        fp = cptf - cptt
+        vn = len(pred) - len(predt) - cptf + cptt
+        fn = len(predt) - cptt
+
+        spec = vn / (vn + fp)
+        sens = vp / (vp + fn)
+        fsc =vp/(vp+(fp+fn)/2)
+
+        print("vrai positif:", vp)
+        print("faux positif:", fp )
+        print("vrai négatif:", vn )
+        print("faux négatif:",fn)
+        print("sensibilité:", sens)
+        print("spécificité:", spec)
+        print("fscore:", fsc)
 
 
 
@@ -505,11 +254,7 @@ def data_visualisation( nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, img_id, t
         print(k, len(i["Predicted"]))
 
 
-    #just show the
-    fig.set_size_inches(30, 15)
-    plt.title("coloration des zones déjà annotées" + terminaison)
-    plt.savefig(namefolder + "coloration_zones_annotées_" + terminaison + suffixe+ ".png", format="png")
-    # ax.cla()
+
 
     fig, ax = plt.subplots()
     fig.set_size_inches(20, 20)
@@ -551,16 +296,10 @@ def data_visualisation( nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, img_id, t
     fig.set_size_inches(30, 15)
     plt.savefig(namefolder + "coloration_carrés_annotées" + terminaison + suffixe+ ".png", format="png")
     plt.close('all')
-    return term_score
+    return adjusted_mutual_info_score(real, pred), fsc
 
 
-def process_data(data):
-    raw_data = np.asarray(list(data.item().values()), dtype=np.float_)
-    labels = list(data.item().keys())
-    return raw_data, labels
 
-def flatten_raw_data(raw_data):
-    return raw_data.reshape((raw_data.shape[0], np.prod(raw_data.shape[1:])))
 
 
 def load_annotations(file_with_Term, file_with_Polygon, img_id, nb_clust, ax=None):
@@ -574,15 +313,16 @@ def load_annotations(file_with_Term, file_with_Polygon, img_id, nb_clust, ax=Non
                 mask_type[record["Id"]]["Clust"] = [[] for i in range(nb_clust)]
                 mask_type[record["Id"]]["Term"] = record["Term"]
                 mask_type[record["Id"]]["Patches"] = []
+                mask_type[record["Id"]]["WKT"] = Polygon()
 
     with open(file_with_Polygon, mode='r') as f:
         rcsv = csv.DictReader(f, delimiter=";")
         for record in rcsv:
             try:
                 if record["Image"] == img_id:
-                    mask_type[record["ID"]]["WKT"] = wkt.loads(record["WKT "])
+                    mask_type[record["ID"]]["WKT"] = wkt.loads(record["WKT"])
                     if ax is not None:
-                        ax.plot(*wkt.loads(record["WKT "]).exterior.coords.xy)
+                        ax.plot(*wkt.loads(record["WKT"]).exterior.coords.xy)
             except KeyError:
                 pass
     return mask_type
@@ -658,12 +398,12 @@ def get_UMAP_classes(data_list, dct_patch, nb_clust, mask_type, IMG_SIZE, IMG_DI
     axes = axes.flatten()
     for data_name in data_list:
         print("UMAP ", data_name)
-        term_list = get_termlist(dct_patch, mask_type, nb_clust, IMG_SIZE, LOD)
+        term_list = get_termlist(dct_patch, mask_type, nb_clust, IMG_SIZE, path.LOD)
         data = np.load(IMG_DIR + data_name, allow_pickle=True)
         raw_data, labels = process_data(data)
         raw_data = flatten_raw_data(raw_data)
         data = dict(zip(labels, raw_data))
-        UMAP_for_a_class(data, nb_clust, term_list, axes, len(data_list), shift, nb_limit=1000)
+        UMAP_for_a_class(data, nb_clust, term_list, axes, len(data_list), shift, nb_limit=100)
         shift+=1
     plt.show()
 
@@ -721,25 +461,62 @@ def UMAP_for_a_class(data, nb_clust, term_list, axes,scale, shift, nb_limit=500)
 if __name__ == '__main__':
     #
     # print("Normal")
-    # namefolder = "./Normal2/"
-    # makedirs(namefolder, exist_ok=True)
-    # dct_patch = {}
-    # nb_clust =4
-    # mask_type = load_annotations("./annoWeird.csv", "./anno.csv", IMG_ID, nb_clust)
-    # with open(IMG_DIR + "../tile_selection2.tsv") as f:
-    #     rcsv = csv.reader(f, delimiter="\t")
-    #     # read the first line that holds column labels
-    #     csv_labels = rcsv.__next__()
-    #     for record in rcsv:
-    #         if record[3] == '1':
-    #             dct_patch[record[0]] = Patch(record[0], size=ptch_size, row=int(record[4]), column=int(record[5]))
+    namefolder = "./Tableau-Rapport/"
+    base= namefolder
+    makedirs(namefolder, exist_ok=True)
+    dct_patch = {}
+    mask_type = load_annotations("./annoWeird.csv", "./anno.csv", path.IMG_ID, 0)
+    with open(path.IMG_DIR + "../tile_selection2.tsv") as f:
+        rcsv = csv.reader(f, delimiter="\t")
+        # read the first line that holds column labels
+        csv_labels = rcsv.__next__()
+        for record in rcsv:
+            if record[3] == '1':
+                dct_patch[record[0]] = Patch(record[0], size=path.ptch_size, row=int(record[4]), column=int(record[5]))
+
+    nbc = 10
+    minC = 6
+    th=0.7
+    print("Ensemble2")
+    for llod in [[8,8,2]]:
+     for nclust in [[4,8,4],[4,8,6],[4,8,8],[6,8,4],[6,8,6],[6,8,8]]:
+      for path.IMG_ID, path.IMG_NAME, path.IMG_SIZE in [ ('10823', "A17-4808_-_2019-11-06_14.31.08",[65280 , 53760] ),\
+                                        ('6522463', 'H110029662_-_2019-02-27_16.20.10', [84480, 55040] ),\
+                                        ('324901','H110028759_-_2019-02-27_16.12.43', [80640, 55040])]:
+       for listMethods in [[clustering.make_clusters_KMeans, clustering.make_clusters_KMeans,clustering.make_clusters_KMeans,clustering.make_clusters_KMeans, clustering.make_clusters_KMeans, clustering.make_clusters_KMeans, clustering.make_clusters_KMeans]]:
+        with open(namefolder + "val.csv", 'a') as f:
+            wcsv = csv.writer(f, delimiter="\t")
+            # read the first line that holds column labels
+            wcsv.writerow([ str(llod) + " " + str(nclust),path.IMG_NAME, "kmeans clustering"  ])
+
+        ll = llod #* (len(listMethods))
+        lc = nclust# * (len(listMethods))
+        print(ll,lc)
+        ensemble_clustering_and_img_drawing(path.IMG_SIZE, path.ptch_size, listMethods=listMethods, listLod=ll, listClusters=lc,seuil=th, namefolder=namefolder)
+
+    # for i in ['1',"2","3"]:
+    #     namefolder = base+"res"+i+"/"
+    #     makedirs(namefolder, exist_ok=True)
+    #     data = np.load("best_autoenco/res" +i +".npy", allow_pickle=True)
+    #     raw_data, labels = process_data(data)
+    #     raw_data = flatten_raw_data(raw_data)
+    #     labels = labels
+    #     data = dict(zip(labels, raw_data))
     #
-    # data = np.load(IMG_DIR + "../predicted_array_512.npy", allow_pickle=True)
-    # raw_data, labels = process_data(data)
-    # raw_data = flatten_raw_data(raw_data)
-    # labels = labels
-    # data = dict(zip(labels, raw_data))
-    # print("start cluster")
+    #
+    #     a,_= clustering.make_clusters_Agglo(raw_data, 16)
+    #     print(np.unique(a))
+    #     dct_col = dict(zip(labels, a))
+    #     for l, c in dct_col.items():
+    #         try:
+    #          dct_patch[l[:-4]].colour = c
+    #         except:
+    #             print(l)
+    #     clustering_and_img_drawin(IMG_SIZE, dct_patch, IMG_DIR, nb_clust=len(np.unique(a)), res_name=namefolder + 'res' ,
+    #                                   thumb_size=(2000, 2000))
+    #     data_visualisation(len(np.unique(a)), mask_type, dct_patch, IMG_SIZE, LOD, IMG_ID, '', namefolder)
+    #     clustering.plot_dendrogram(raw_data)
+
     # a, _ = clustering.make_clusters_2(raw_data, nb_clust, 110000)
     # dct_col = dict(zip(labels, a))
     # print("end cluster")
@@ -755,24 +532,6 @@ if __name__ == '__main__':
     # clustering_and_img_drawin(IMG_SIZE, dct_patch, IMG_DIR, nb_clust=nb_clust, res_name=namefolder+'res', thumb_size=(7000, 7000))
     #
     # term_list = data_visualisation(nb_clust, mask_type, dct_patch, IMG_SIZE, LOD, IMG_ID, '', namefolder)
-
-    nbc = 10
-    minC = 6
-    th=0.7
-    print("Ensemble2")
-    nd= "./Contrôle/EnsembleMulti2/"
-    makedirs(nd, exist_ok=True)
-
-    LODs=[4]
-    ll=LODs*nbc
-
-    lc=[minC+ i // len(LODs) for i in range(nbc*len(LODs))]
-    print(ll,lc)
-    ensemble_clustering([80640, 55040], ptch_size, listLod=ll, listClusters=lc,seuil=th, namefolder=nd)
-
-
-
-
 
     # # data_list = ["../patchesArray.npy", "../predicted_array3.npy" ]
     # # nb_clust = 7
